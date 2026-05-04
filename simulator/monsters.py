@@ -2652,12 +2652,9 @@ class 萨卡兹枯朽吞噬者(Monster):
 # ═══════════════════════════════════════════
 
 class 提亚卡乌破坏王(Monster):
-    """破坏王 — 高攻，攻击附带减防"""
+    """破坏王 — 高防近战，无特殊技能"""
     def on_spawn(self):
         self.attack_animation = AttackAnimation(0.3, 0.15, 0.55, self)
-
-    def on_attack(self, target, damage):
-        target.phy_def = max(0, target.phy_def - 50)
 
 
 # ═══════════════════════════════════════════

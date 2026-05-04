@@ -1,0 +1,7 @@
+Spider JSON name: '变异巨岩蛛'
+Bug JSON name: '源石畸变体'
+Monsters after setup: 0
+
+Running 500 frames...
+Spawns: 0 total, 0 alive
+  Final DeathSummon: timer=? total=?

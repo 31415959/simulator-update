@@ -1,0 +1,2 @@
+After 300f: 0赘生物 alive, total=18
+赘生物 in mdata: ['畸变赘生物']

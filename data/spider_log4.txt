@@ -1,0 +1,5 @@
+Monsters: 0, temporal L=0 R=1
+Battle ended at f1: Faction.RIGHT
+
+Alive spawns: 0
+Total spawns ever: 0

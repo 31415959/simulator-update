@@ -1,0 +1,6 @@
+setup with '源石畸变体' vs '变异巨岩蛛'
+monsters: 0
+
+Running 1000 frames...
+Spawns: 4 (4 alive)
+  Final DeathSummon: timer=? total=?

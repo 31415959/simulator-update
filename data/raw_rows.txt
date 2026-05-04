@@ -1,0 +1,21 @@
+Row0 (index): 69 cols, last='69'
+  non-zero: 68 entries
+    col0=1
+    col1=2
+    col2=3
+    col3=4
+    col4=5
+    col5=6
+    col6=7
+    col7=8
+    col8=9
+    col9=10
+
+Row1 (battle): 69 cols, winner=L
+  non-zero: 6 entries
+    col14=6.0
+    col24=3.0
+    col33=5.0
+    col49=5.0
+    col54=6.0
+    col59=5.0
