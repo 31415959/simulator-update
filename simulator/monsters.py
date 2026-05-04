@@ -2154,12 +2154,11 @@ class 沙滩车(Monster):
         self.attack_animation = AttackAnimation(0.3, 0.2, 0.5, self)
         self.passengers = []
         self.max_passengers = 3
-        self.load_range = 0.8
-        self.unload_range = 1.5
+        self.load_range = 0.5
         self.unloaded = False
 
     def on_extra_update(self, delta_time):
-        # 载客：跳过自己和同类型单位（机械）
+        # 载客：搭载非领袖地面友方单位（乘客只在车被摧毁时下车）
         if len(self.passengers) < self.max_passengers and not self.unloaded:
             for m in self.battlefield.alive_monsters:
                 if m == self or not m.is_alive or m.faction != self.faction:
@@ -2176,15 +2175,6 @@ class 沙滩车(Monster):
                     debug_print(f"{self.name}{self.id} 搭载了 {m.name}{m.id}")
                     if len(self.passengers) >= self.max_passengers:
                         break
-        # 卸客：接近敌人时释放
-        if not self.unloaded and self.passengers:
-            enemies = [t for t in self.battlefield.alive_monsters
-                       if t.faction != self.faction and t.is_alive]
-            if enemies:
-                nearest = min((t.position - self.position).magnitude for t in enemies)
-                if nearest <= self.unload_range:
-                    self._unload_all()
-                    self.unloaded = True
 
     def _unload_all(self):
         for p in self.passengers:
@@ -2248,26 +2238,39 @@ class 散华骑士团学徒(Monster):
 # ═══════════════════════════════════════════
 
 class 反装甲步兵(Monster):
-    """反装甲步兵 — 首次攻击发射榴弹200%物伤8格AOE，之后切换近战+200%攻击"""
+    """反装甲步兵 — 仅一发榴弹(200%物伤8格AOE)，1.14s后切换冲锋模式(+200%移速，攻击回归100%)"""
     def on_spawn(self):
         self.attack_animation = AttackAnimation(0.4, 0.2, 0.4, self)
-        self.mode = "榴弹"  # 榴弹 / 近战
+        self.mode = "反装甲"  # 反装甲 / 冲锋
         self.base_atk = self.attack_power
+        self.base_move = self.move_speed
+        self.mode_timer = 0  # 切换计时器
+
+    def on_extra_update(self, delta_time):
+        if self.mode_timer > 0:
+            self.mode_timer -= delta_time
+            if self.mode_timer <= 0:
+                self.mode = "冲锋"
+                self.attack_power = self.base_atk  # 攻击回归100%
+                self.move_speed = self.base_move * 3.0  # +200%移速
+                self.attack_animation = AttackAnimation(0.15, 0.15, 0.7, self)
+                debug_print(f"{self.name}{self.id} 切换冲锋模式！移速+200%")
 
     def attack(self, target, gameTime):
-        if self.mode == "榴弹":
-            # 榴弹模式：发射AOE后切换
-            self.mode = "近战"
-            self.attack_power = self.base_atk * 3.0  # +200%
-            self.attack_animation = AttackAnimation(0.15, 0.15, 0.7, self)
-            # 对目标位置8格AOE
+        if self.mode == "反装甲":
+            # 反装甲模式：仅一发榴弹，之后开始计时切换
+            self.mode = "已发射"  # 防止再次发射
+            self.mode_timer = 1.14  # 1.14秒后切换冲锋
             from .projectiles import AOEType, AOE炸弹锁定
             self.battlefield.projectiles_manager.spawn_projectile(
                 AOE炸弹锁定(0.2, self.base_atk * 2.0, DamageType.PHYSICAL, self, target,
                             name="榴弹", aoeType=AOEType.Grid8))
-            debug_print(f"{self.name}{self.id} 发射榴弹！切换近战模式")
+            debug_print(f"{self.name}{self.id} 发射榴弹(200%ATK)，1.14s后切换冲锋")
+        elif self.mode == "已发射":
+            # 等待切换中，不攻击
+            pass
         else:
-            # 近战模式：正常攻击
+            # 冲锋模式：正常近战攻击(100%ATK)
             targets = TargetSelector.select_targets(self, self.battlefield, need_in_range=True, max_targets=1)
             if not targets:
                 return
