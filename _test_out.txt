@@ -1,0 +1,31 @@
+怪物: 114 只 | MAPPING: 78
+对战: 25 | 每场3次 | 并行6线程
+
+杰斯顿·威廉姆斯1已进入狂暴状态
+模拟:   0%|          | 0/25 [00:00<?, ?it/s]模拟:  20%|██        | 5/25 [00:03<00:12,  1.61it/s]模拟:  24%|██▍       | 6/25 [00:03<00:11,  1.72it/s]模拟:  28%|██▊       | 7/25 [00:15<00:59,  3.29s/it]模拟:  32%|███▏      | 8/25 [00:26<01:31,  5.40s/it]模拟:  36%|███▌      | 9/25 [00:45<02:24,  9.05s/it]模拟:  68%|██████▊   | 17/25 [00:45<00:21,  2.70s/it]
+杰斯顿·威廉姆斯1已进入狂暴状态
+杰斯顿·威廉姆斯0已进入狂暴状态
+杰斯顿·威廉姆斯0已进入狂暴状态
+杰斯顿·威廉姆斯1已进入狂暴状态
+Traceback (most recent call last):
+  File "G:\314\CannotMax-main\_quick_test.py", line 12, in <module>
+    acc = main('arknights.csv', num_matches=n, sim_runs=3, parallel=6)
+  File "G:\314\CannotMax-main\simulator\simulate.py", line 79, in main
+    results = list(tqdm(pool.map(sim_one, records), total=total, desc="模拟"))
+  File "G:\Software\Python310\lib\site-packages\tqdm\std.py", line 1181, in __iter__
+    for obj in iterable:
+  File "G:\Software\Python310\lib\concurrent\futures\_base.py", line 621, in result_iterator
+    yield _result_or_cancel(fs.pop())
+  File "G:\Software\Python310\lib\concurrent\futures\_base.py", line 319, in _result_or_cancel
+    return fut.result(timeout)
+  File "G:\Software\Python310\lib\concurrent\futures\_base.py", line 451, in result
+    return self.__get_result()
+  File "G:\Software\Python310\lib\concurrent\futures\_base.py", line 403, in __get_result
+    raise self._exception
+  File "G:\Software\Python310\lib\concurrent\futures\thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "G:\314\CannotMax-main\simulator\simulate.py", line 67, in sim_one
+    if not bf.setup_battle(rec["left"], rec["right"], monster_data):
+  File "G:\314\CannotMax-main\simulator\battle_field.py", line 153, in setup_battle
+    raise ValueError(f"右侧怪物 {name} 在 monster_data 中未找到!")
+ValueError: 右侧怪物 “阿咬” 在 monster_data 中未找到!

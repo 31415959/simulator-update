@@ -131,6 +131,9 @@ class Battlefield:
                 if alt:
                     data = next((m for m in md if m["名字"] == alt), None)
             if data is None:
+                # 模糊匹配：处理弯引号差异（如 "屠谕者" vs 屠谕者）
+                data = next((m for m in md if m["名字"].replace('"','').replace('\u201c','').replace('\u201d','') == name.replace('"','').replace('\u201c','').replace('\u201d','')), None)
+            if data is None:
                 raise ValueError(f"左侧怪物 {name} 在 monster_data 中未找到!")
             allies = data.get("协同", [])
             for _ in range(count):
@@ -149,6 +152,9 @@ class Battlefield:
                 alt = REVERSE_MONSTER_MAPPING.get(name)
                 if alt:
                     data = next((m for m in md if m["名字"] == alt), None)
+            if data is None:
+                # 模糊匹配：处理弯引号差异
+                data = next((m for m in md if m["名字"].replace('"','').replace('\u201c','').replace('\u201d','') == name.replace('"','').replace('\u201c','').replace('\u201d','')), None)
             if data is None:
                 raise ValueError(f"右侧怪物 {name} 在 monster_data 中未找到!")
             allies = data.get("协同", [])
