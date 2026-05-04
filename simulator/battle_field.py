@@ -21,7 +21,17 @@ from .zone import PoisonZone
 
 # 场景参数
 MAP_SIZE = np.array([13, 9])  # 场景宽度（单位：格）
-SPAWN_AREA = 2  # 阵营出生区域宽度
+
+# 分批投放参数
+WAVE_SIZE = 18           # 每波每边投放数
+WAVE_COOLDOWN = 30       # 波间冷却帧数 (1秒 @30fps)
+DEPLOY_INTERVAL = 1      # 波内每帧投放一个（18帧≈0.6s出完一波）
+
+# 出生门配置（每边9个门，均匀分布在y轴）
+DOOR_COUNT = 9
+DOOR_SPAWN_RADIUS = 0.2  # 门中心半径0.2范围内随机出生
+LEFT_DOORS = [FastVector(0, 0.5 + i) for i in range(DOOR_COUNT)]
+RIGHT_DOORS = [FastVector(MAP_SIZE[0], 0.5 + i) for i in range(DOOR_COUNT)]
 
 
 from collections import defaultdict
@@ -50,6 +60,19 @@ class Battlefield:
         self.monster_temporal_area_right = []
         self.current_spawn_left = 0
         self.current_spawn_right = 0
+        # 分批投放状态
+        self._wave_deployed_left = 0
+        self._wave_deployed_right = 0
+        self._wave_cooldown = 0
+
+    @staticmethod
+    def _random_door_pos(faction):
+        """从对应阵营的9个门中随机选一个，在半径0.2范围内随机出生"""
+        doors = LEFT_DOORS if faction == Faction.LEFT else RIGHT_DOORS
+        door = random.choice(doors)
+        angle = random.uniform(0, 2 * math.pi)
+        r = random.uniform(0, DOOR_SPAWN_RADIUS)
+        return FastVector(door.x + r * math.cos(angle), door.y + r * math.sin(angle))
 
     def query_monster(self, target_position, radius) -> list['Monster']:
         results = []
@@ -100,7 +123,7 @@ class Battlefield:
         """二维战场初始化（使用 self.monster_data 以应用绿藤城规则）"""
         from .utils import REVERSE_MONSTER_MAPPING
         md = self.monster_data  # 使用已调整的数据
-        # 左阵营生成在左上区域
+        # 左阵营生成在左侧门区域
         for (name, count) in left_army.items():
             data = next((m for m in md if m["名字"] == name), None)
             if data is None:
@@ -111,15 +134,15 @@ class Battlefield:
                 raise ValueError(f"左侧怪物 {name} 在 monster_data 中未找到!")
             allies = data.get("协同", [])
             for _ in range(count):
-                pos = FastVector(random.uniform(0, SPAWN_AREA), random.uniform(0, MAP_SIZE[1]))
+                pos = self._random_door_pos(Faction.LEFT)
                 self.monster_temporal_area_left.append( MonsterFactory.create_monster(data, Faction.LEFT, pos, self))
                 for ally_name in allies:
                     ally_data = next((m for m in md if m["名字"] == ally_name), None)
                     if ally_data:
-                        pos = FastVector(random.uniform(0, SPAWN_AREA), random.uniform(0, MAP_SIZE[1]))
+                        pos = self._random_door_pos(Faction.LEFT)
                         self.monster_temporal_area_left.append( MonsterFactory.create_monster(ally_data, Faction.LEFT, pos, self))
 
-        # 右阵营生成在右下区域
+        # 右阵营生成在右侧门区域
         for (name, count) in right_army.items():
             data = next((m for m in md if m["名字"] == name), None)
             if data is None:
@@ -130,20 +153,36 @@ class Battlefield:
                 raise ValueError(f"右侧怪物 {name} 在 monster_data 中未找到!")
             allies = data.get("协同", [])
             for _ in range(count):
-                pos = FastVector(random.uniform(MAP_SIZE[0]-SPAWN_AREA, MAP_SIZE[0]), random.uniform(0, MAP_SIZE[1]))
+                pos = self._random_door_pos(Faction.RIGHT)
                 self.monster_temporal_area_right.append(MonsterFactory.create_monster(data, Faction.RIGHT, pos, self))
                 for ally_name in allies:
                     ally_data = next((m for m in md if m["名字"] == ally_name), None)
                     if ally_data:
-                        pos = FastVector(random.uniform(MAP_SIZE[0]-0.5, MAP_SIZE[0]), random.uniform(0, MAP_SIZE[1]))
+                        pos = self._random_door_pos(Faction.RIGHT)
                         self.monster_temporal_area_right.append(MonsterFactory.create_monster(ally_data, Faction.RIGHT, pos, self))
 
         self.alive_monsters = self.monsters
         self.gameTime = 0
         self.current_spawn = 0
-        random.shuffle(self.monster_temporal_area_left)
-        random.shuffle(self.monster_temporal_area_right)
+        # 分批投放：同种怪保持连续（种内随机，种类顺序随机），避免不同种类交错
+        self._shuffle_by_type(self.monster_temporal_area_left)
+        self._shuffle_by_type(self.monster_temporal_area_right)
         return True
+
+    @staticmethod
+    def _shuffle_by_type(units):
+        """同种怪物保持连续，种内随机打乱，种类出场顺序也随机"""
+        from collections import defaultdict
+        by_name = defaultdict(list)
+        for u in units:
+            by_name[u.name].append(u)
+        names = list(by_name.keys())
+        random.shuffle(names)  # 种类出场顺序随机
+        units.clear()
+        for n in names:
+            group = by_name[n]
+            random.shuffle(group)  # 同种内部随机
+            units.extend(group)
 
     def check_victory(self):
         """检查胜利条件"""
@@ -176,14 +215,32 @@ class Battlefield:
     def run_one_frame(self):
         self.round += 1
 
-        if self.round < 40 or self.round > 90:
-            if self.current_spawn_left < len(self.monster_temporal_area_left) and self.round % 2 == 0:
-                self.append_monster(self.monster_temporal_area_left[self.current_spawn_left])
-                self.current_spawn_left += 1
+        # === 分批投放：每波≤18/边，波间冷却1秒（30帧），波内每帧1只 ===
+        if self._wave_cooldown > 0:
+            self._wave_cooldown -= 1
+        else:
+            has_left = self.current_spawn_left < len(self.monster_temporal_area_left)
+            has_right = self.current_spawn_right < len(self.monster_temporal_area_right)
+            if has_left or has_right:
+                if self.round % DEPLOY_INTERVAL == 0:
+                    if has_left:
+                        self.append_monster(self.monster_temporal_area_left[self.current_spawn_left])
+                        self.current_spawn_left += 1
+                        self._wave_deployed_left += 1
+                    if has_right:
+                        self.append_monster(self.monster_temporal_area_right[self.current_spawn_right])
+                        self.current_spawn_right += 1
+                        self._wave_deployed_right += 1
 
-            if self.current_spawn_right < len(self.monster_temporal_area_right) and self.round % 2 == 0:
-                self.append_monster(self.monster_temporal_area_right[self.current_spawn_right])
-                self.current_spawn_right += 1
+                    # 两边都达到波次上限（或无剩余单位）→ 进入冷却
+                    left_done = (self.current_spawn_left >= len(self.monster_temporal_area_left)
+                                 or self._wave_deployed_left >= WAVE_SIZE)
+                    right_done = (self.current_spawn_right >= len(self.monster_temporal_area_right)
+                                  or self._wave_deployed_right >= WAVE_SIZE)
+                    if left_done and right_done:
+                        self._wave_cooldown = WAVE_COOLDOWN
+                        self._wave_deployed_left = 0
+                        self._wave_deployed_right = 0
 
         self.check_zone()
         self.projectiles_manager.update_all(VIRTUAL_TIME_DELTA)
