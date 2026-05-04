@@ -190,18 +190,36 @@ class SandboxSimulator:
                 name = md["名字"]
                 import csv, cv2
                 with open('monster_greenvine.csv','r',encoding='utf-8-sig') as cf:
-                    display_to_orig = {row['名称'].strip().strip('"').strip("'").strip(): 
-                                       row['原始名称'].strip().strip('"').strip("'").strip()
-                                       for row in csv.DictReader(cf)}
-                orig = display_to_orig.get(name, name)
-                img_path = f"images/{orig}.png"
-                cv_img = cv2.imdecode(np.fromfile(img_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                    display_to_orig = {}
+                    for row in csv.DictReader(cf):
+                        k = row['名称'].strip().strip('"').strip("'").strip().replace('“','').replace('”','')
+                        v = row['原始名称'].strip()  # 保留原始名称的引号(文件名需要)
+                        display_to_orig[k] = v
+                clean_name = name.replace('“','').replace('”','').replace('"','').replace("'","")
+                orig = display_to_orig.get(clean_name, name)  # 找不到时用JSON原名(含引号)
+                # 尝试多种引号变体（JSON直引号U+0022 vs 文件名弯引号U+201C/D）
+                noq = clean_name  # 纯名字无引号
+                candidates = [
+                    orig,                                          # 原始
+                    '“' + noq + '”',                     # 弯引号
+                    '"' + noq + '"',                               # 直引号
+                    noq,                                           # 无引号
+                ]
+                cv_img = None
+                for cand in candidates:
+                    img_path = f"images/{cand}.png"
+                    cv_img = cv2.imdecode(np.fromfile(img_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                    if cv_img is not None:
+                        break
                 if cv_img is not None:
                     temp = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
                     image = Image.fromarray(temp)
                 else:
                     image = Image.new("RGB", (40, 40), "gray")
-            except Exception:
+            except Exception as e:
+                import traceback
+                print(f"[ICON ERROR] name={name} error={e}")
+                traceback.print_exc()
                 image = Image.new("RGB", (40, 40), "gray")
             self.icons[i] = {
                 "red": ImageTk.PhotoImage(image.resize((40, 40))),
@@ -414,17 +432,12 @@ class SandboxSimulator:
                 ui_unit.team = 'red' if monster.faction == Faction.LEFT else 'blue'
                 display_id_for_icon = 0
                 # 直接用 monsters.json 里的索引（和 load_assets 中 icons 对应）
+                clean_name = monster.name.replace('\u201c','').replace('\u201d','').replace('"','').replace('\u2018','').replace('\u2019','')
                 for idx, md in enumerate(self.monster_data):
-                    if md["名字"] == monster.name:
+                    clean_md = md["名字"].replace('\u201c','').replace('\u201d','').replace('"','').replace('\u2018','').replace('\u2019','')
+                    if clean_md == clean_name:
                         display_id_for_icon = idx
                         break
-                if display_id_for_icon == 0 and self.monster_data:
-                    # 兜底：去引号匹配
-                    clean = monster.name.replace('\u201c','').replace('\u201d','').replace('"','').replace('"','')
-                    for idx, md in enumerate(self.monster_data):
-                        if md["名字"].replace('\u201c','').replace('\u201d','').replace('"','').replace('"','') == clean:
-                            display_id_for_icon = idx
-                            break
                 ui_unit.unit_id = display_id_for_icon
                 ui_unit.health = monster.health
                 ui_unit.max_health = monster.max_health
