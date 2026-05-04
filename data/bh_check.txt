@@ -1,0 +1,26 @@
+config type: '定期召唤'
+hex: e5ae9ae69c9fe58face594a4
+in registry: False
+  reg key: '死亡自爆' hex=e6adbbe4baa1e887aae78886
+  match: False
+  reg key: '死亡召唤' hex=e6adbbe4baa1e58face594a4
+  match: False
+  reg key: '攻击自杀' hex=e694bbe587bbe887aae69d80
+  match: False
+  reg key: '重生' hex=e9878de7949f
+  match: False
+  reg key: '多目标' hex=e5a49ae79baee6a087
+  match: False
+config type: '死亡召唤'
+hex: e6adbbe4baa1e58face594a4
+in registry: True
+  reg key: '死亡自爆' hex=e6adbbe4baa1e887aae78886
+  match: False
+  reg key: '死亡召唤' hex=e6adbbe4baa1e58face594a4
+  match: True
+  reg key: '攻击自杀' hex=e694bbe587bbe887aae69d80
+  match: False
+  reg key: '重生' hex=e9878de7949f
+  match: False
+  reg key: '多目标' hex=e5a49ae79baee6a087
+  match: False

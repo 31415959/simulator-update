@@ -2563,55 +2563,57 @@ class 寻路者信使(Monster):
 # ═══════════════════════════════════════════
 
 class 残党萨克斯手(Monster):
-    """萨克斯手 — 每3次攻击释放扇形音波AOE"""
+    """萨克斯手 — 首发10秒后向4方向发射弹道，之后每20秒一次"""
     def on_spawn(self):
         self.attack_animation = AttackAnimation(0.25, 0.25, 0.5, self)
-        self.attack_count = 0
+        self.skill_timer = 10.0  # 首发10秒
+        self.skill_cooldown = 20.0  # 之后每20秒
+        self.first_skill = True
+
+    def on_extra_update(self, delta_time):
+        self.skill_timer -= delta_time
+        if self.skill_timer <= 0:
+            cd = self.skill_cooldown if not self.first_skill else 0
+            self.first_skill = False
+            self.skill_timer = self.skill_cooldown
+            self._fire_skill()
+
+    def _fire_skill(self):
+        """向4个正方向发射弹道，首个触碰敌人受150%物伤"""
+        pos = self.position
+        atk = self.get_attack_power() * 1.5
+        # 四个方向
+        dirs = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        for dx, dy in dirs:
+            # 寻找弹道方向上最近的敌人
+            best_target = None
+            best_dist = 999999
+            for t in self.battlefield.alive_monsters:
+                if t.faction == self.faction or not t.is_alive:
+                    continue
+                tx = t.position.x - pos.x
+                ty = t.position.y - pos.y
+                # 判断是否在方向上（点积 > 0且偏离角小）
+                if dx * tx + dy * ty > 0:
+                    # 偏离距离
+                    cross = abs(dx * ty - dy * tx)
+                    if cross < 0.2:  # 碰撞半径
+                        dist = math.sqrt(tx*tx + ty*ty)
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_target = t
+            if best_target:
+                dmg = self.calculate_damage(best_target, atk)
+                if self.apply_damage_to_target(best_target, dmg):
+                    best_target.on_hit(self, dmg)
+        debug_print(f"{self.name}{self.id} 吹奏四向音波！")
 
     def attack(self, target, gameTime):
-        self.attack_count += 1
-        is_fan = self.attack_count % 3 == 0
-
-        if is_fan:
-            self._fan_attack()
-        else:
-            targets = TargetSelector.select_targets(self, self.battlefield, need_in_range=True, max_targets=2)
-            for t in targets:
-                dmg = self.calculate_damage(t, self.get_attack_power())
-                if self.apply_damage_to_target(t, dmg):
-                    t.on_hit(self, dmg)
-
-    def _fan_attack(self):
-        """扇形音波攻击"""
-        pos = self.position
-        atk = self.get_attack_power()
-        targets = self.battlefield.query_monster(pos, 3.0)
-        # 确定朝向
-        if self.target:
-            dx = self.target.position.x - pos.x
-            dy = self.target.position.y - pos.y
-        else:
-            dx, dy = 1.0, 0.0
-        fwd_mag = math.sqrt(dx*dx + dy*dy)
-        if fwd_mag > 0:
-            dx /= fwd_mag
-            dy /= fwd_mag
-        half_angle = np.cos(np.radians(30))
+        targets = TargetSelector.select_targets(self, self.battlefield, need_in_range=True, max_targets=2)
         for t in targets:
-            if t.faction == self.faction or not t.is_alive:
-                continue
-            tx = t.position.x - pos.x
-            ty = t.position.y - pos.y
-            dist = math.sqrt(tx*tx + ty*ty)
-            if dist < 0.01 or dist > 3.0:
-                continue
-            # 点积判断是否在扇形内
-            dot = dx * (tx/dist) + dy * (ty/dist)
-            if dot >= half_angle:
-                dmg = self.calculate_damage(t, atk * 1.2)
-                if self.apply_damage_to_target(t, dmg):
-                    t.on_hit(self, dmg)
-        debug_print(f"{self.name}{self.id} 吹奏扇形音波！")
+            dmg = self.calculate_damage(t, self.get_attack_power())
+            if self.apply_damage_to_target(t, dmg):
+                t.on_hit(self, dmg)
 
 
 # ═══════════════════════════════════════════
@@ -2634,6 +2636,26 @@ class 高级武装人员(Monster):
 # ═══════════════════════════════════════════
 # 萨卡兹枯朽吞噬者 — 极饿先锋
 # ═══════════════════════════════════════════
+
+class 枯朽之种(Monster):
+    """枯朽之种 — 飞行冲刺自爆，2.0范围有敌人时速度10冲向目标"""
+    def on_spawn(self):
+        self.attack_animation = AttackAnimation(0.1, 0.1, 0.8, self)
+        self._dashing = False
+        self._normal_speed = self.move_speed
+
+    def on_extra_update(self, delta_time):
+        if not self._dashing:
+            # 检查2.0范围内是否有敌人
+            for t in self.battlefield.alive_monsters:
+                if t.faction != self.faction and t.is_alive:
+                    if (t.position - self.position).magnitude <= 2.0:
+                        self._dashing = True
+                        self.move_speed = 10.0
+                        self.target = t
+                        debug_print(f"{self.name}{self.id} 冲刺！速度10")
+                        break
+
 
 class 萨卡兹枯朽吞噬者(Monster):
     """枯朽吞噬者 — 击杀敌人回复15%生命"""
@@ -2662,31 +2684,10 @@ class 提亚卡乌破坏王(Monster):
 # ═══════════════════════════════════════════
 
 class 泥岩巨像(Monster):
-    """泥岩巨像 — 每15秒释放一次震地AOE"""
+    """泥岩巨像 — 纯面板怪，无技能"""
     def on_spawn(self):
         self.attack_animation = AttackAnimation(0.4, 0.4, 0.2, self)
-        self.slam_timer = 15.0
-        self.slam_radius = 2.0
-        self.slam_dmg_ratio = 2.0
         self.boss = True
-
-    def on_extra_update(self, delta_time):
-        self.slam_timer -= delta_time
-        if self.slam_timer <= 0:
-            self.slam_timer = 15.0
-            self._slam()
-
-    def _slam(self):
-        """震地AOE"""
-        pos = self.position
-        dmg_base = self.get_attack_power() * self.slam_dmg_ratio
-        for t in self.battlefield.alive_monsters:
-            if t.faction != self.faction and t.is_alive and \
-               (t.position - pos).magnitude <= self.slam_radius:
-                dmg = self.calculate_damage(t, dmg_base)
-                if self.apply_damage_to_target(t, dmg):
-                    t.on_hit(self, dmg)
-        debug_print(f"{self.name} 震地！范围{self.slam_radius}")
 
 
 # ═══════════════════════════════════════════
@@ -2999,6 +3000,7 @@ class MonsterFactory:
         "残党萨克斯手": 残党萨克斯手,
         "高级武装人员": 高级武装人员,
         "萨卡兹枯朽吞噬者": 萨卡兹枯朽吞噬者,
+        "枯朽之种": 枯朽之种,
         "提亚卡乌破坏王": 提亚卡乌破坏王,
         "泥岩巨像": 泥岩巨像,
         "岁相": 岁相,

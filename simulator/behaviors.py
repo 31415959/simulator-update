@@ -672,6 +672,7 @@ BEHAVIOR_REGISTRY = {
     "半血分裂": SplitOnHalfHP,
     "定时召唤": PeriodicSummon,
     "周期召唤": PeriodicSummon,
+    "定期召唤": PeriodicSummon,
     "持续回血": RegenOnUpdate,
     "持续掉血": HealthLossOnUpdate,
     "半血狂暴": StatBoostOnLowHP,
