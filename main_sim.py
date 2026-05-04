@@ -208,9 +208,12 @@ class SandboxSimulator:
                 cv_img = None
                 for cand in candidates:
                     img_path = f"images/{cand}.png"
-                    cv_img = cv2.imdecode(np.fromfile(img_path, dtype=np.uint8), cv2.IMREAD_COLOR)
-                    if cv_img is not None:
-                        break
+                    try:
+                        cv_img = cv2.imdecode(np.fromfile(img_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                        if cv_img is not None:
+                            break
+                    except Exception:
+                        continue
                 if cv_img is not None:
                     temp = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
                     image = Image.fromarray(temp)
