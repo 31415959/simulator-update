@@ -490,6 +490,10 @@ class Monster:
         self.status_system.update(delta_time)
         self.update_elemental(delta_time)
 
+        # BUGFIX: 沙滩车搭载后不移动/索敌/攻击，但buff计时正常运行
+        if not self.can_target:
+            return
+
         if self.target is None or not self.target.can_be_target() or (
                 self.target.position - self.position).magnitude > self.attack_range:
             # 寻找新目标
@@ -2159,6 +2163,8 @@ class 沙滩车(Monster):
         if len(self.passengers) < self.max_passengers and not self.unloaded:
             for m in self.battlefield.alive_monsters:
                 if m == self or not m.is_alive or m.faction != self.faction:
+                    continue
+                if not m.can_target:  # BUGFIX: 已被其他沙滩车搭载
                     continue
                 if m in self.passengers or m.boss:
                     continue
