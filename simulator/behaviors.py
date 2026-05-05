@@ -8,7 +8,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from .monsters import Monster
-from .utils import BuffEffect, BuffType, DamageType, calculate_normal_dmg, debug_print, Faction
+from .utils import BuffEffect, BuffType, DamageType, ElementType, calculate_normal_dmg, debug_print, Faction
 from .vector2d import FastVector
 
 # 模块级别名，供多个Behavior类使用
@@ -305,9 +305,16 @@ class DefenseReduceOnAttack(BaseBehavior):
 
 
 class FireOnAttack(BaseBehavior):
-    """攻击附带灼燃"""
+    """攻击附带灼燃 — 施加灼烧DOT，可选附加即时灼燃损伤"""
+    def __init__(self, owner, 伤害倍率=0):
+        super().__init__(owner)
+        self.伤害倍率 = 伤害倍率
+
     def on_attack(self, target, damage):
         target.status_system.apply(BuffEffect(BuffType.FIRE, 10.0, self.owner))
+        if self.伤害倍率 > 0:
+            burn_val = self.owner.get_attack_power() * self.伤害倍率
+            target.element_system.accumulate(ElementType.FIRE, burn_val)
 
 
 class ReflectDamage(BaseBehavior):

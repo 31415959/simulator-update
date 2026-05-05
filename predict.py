@@ -55,7 +55,7 @@ class CannotModel:
             except Exception:
                 pass
 
-        all_pth = sorted(model_dir.glob("best_model_*.pth"))
+        all_pth = sorted(model_dir.glob("*.pth"))
         if not load_all and target_names:
             load_targets = [f for f in all_pth if f.stem in target_names or f.name in target_names]
             logger.info(f"精简加载: {len(load_targets)}/{len(all_pth)} 个模型")
@@ -93,14 +93,33 @@ class CannotModel:
                 if _load_one(f):
                     logger.info(f"加载: {f.name}")
         
-        self.is_model_loaded = len(self.models) > 0
+        # 同时加载 ONNX 模型
+        self.onnx_sessions = []
+        self.onnx_names = []
+        onnx_files = sorted(model_dir.glob("*.onnx"))
+        if onnx_files:
+            try:
+                import onnxruntime as ort
+                for f in onnx_files:
+                    try:
+                        sess = ort.InferenceSession(str(f), providers=['CPUExecutionProvider'])
+                        self.onnx_sessions.append(sess)
+                        self.onnx_names.append(f.name)
+                        logger.info(f"加载 ONNX: {f.name}")
+                    except Exception as e:
+                        logger.warning(f"跳过 ONNX {f.name}: {e}")
+            except ImportError:
+                logger.warning("onnxruntime 未安装，跳过 ONNX 模型")
+
+        self.is_model_loaded = len(self.models) > 0 or len(self.onnx_sessions) > 0
         if self.is_model_loaded:
-            self.model_weights = {name: 3.0 for name in self.model_names}
+            all_names = self.model_names + self.onnx_names
+            self.model_weights = {name: 3.0 for name in all_names}
             self._last_predictions = {}
             self._load_weights()
-            logger.info(f"加载完成: {len(self.models)} 个模型")
+            logger.info(f"加载完成: {len(self.models)} PyTorch + {len(self.onnx_sessions)} ONNX = {len(all_names)} 个模型")
         else:
-            logger.error(f"在 {model_dir} 中未找到 .pth 模型")
+            logger.error(f"在 {model_dir} 中未找到任何模型")
 
     def _weights_path(self):
         return Path(self.model_path) / "model_weights.json"
@@ -164,12 +183,27 @@ class CannotModel:
     def _ensemble_predict(self, left_signs, left_counts, right_signs, right_counts):
         preds = []
         names = []
+        # PyTorch 模型
         with torch.no_grad():
             for i, model in enumerate(self.models):
                 p = model(left_signs, left_counts, right_signs, right_counts).item()
                 if not (np.isnan(p) or np.isinf(p)):
                     preds.append(p)
                     names.append(self.model_names[i] if i < len(self.model_names) else f"model_{i}")
+        # ONNX 模型
+        for i, sess in enumerate(self.onnx_sessions):
+            try:
+                ls = left_signs.cpu().numpy().astype(np.int64)
+                lc_val = left_counts.cpu().numpy().astype(np.int64)
+                rs = right_signs.cpu().numpy().astype(np.int64)
+                rc = right_counts.cpu().numpy().astype(np.int64)
+                out = sess.run(["output"], {"left_signs": ls, "left_counts": lc_val, "right_signs": rs, "right_counts": rc})
+                p = float(out[0].flatten()[0])
+                if not (np.isnan(p) or np.isinf(p)):
+                    preds.append(p)
+                    names.append(self.onnx_names[i] if i < len(self.onnx_names) else f"onnx_{i}")
+            except Exception as e:
+                logger.warning(f"ONNX 预测失败 {self.onnx_names[i]}: {e}")
         if not preds:
             return 0.5
         # 加权平均
@@ -213,6 +247,20 @@ class CannotModel:
                 name = self.model_names[i] if i < len(self.model_names) else f"model_{i+1}"
                 results[name] = p
                 preds.append(p)
+        # ONNX 模型
+        for i, sess in enumerate(self.onnx_sessions):
+            try:
+                ls_np = ls.cpu().numpy().astype(np.int64)
+                lc_np = lc.cpu().numpy().astype(np.int64)
+                rs_np = rs.cpu().numpy().astype(np.int64)
+                rc_np = rc.cpu().numpy().astype(np.int64)
+                out = sess.run(["output"], {"left_signs": ls_np, "left_counts": lc_np, "right_signs": rs_np, "right_counts": rc_np})
+                p = float(np.clip(float(out[0].flatten()[0]), 0.0, 1.0))
+                name = self.onnx_names[i] if i < len(self.onnx_names) else f"onnx_{i}"
+                results[name] = p
+                preds.append(p)
+            except Exception as e:
+                logger.warning(f"ONNX 预测失败 {self.onnx_names[i]}: {e}")
         # 加权集成
         total_w = sum(self.model_weights.get(n, 3.0) for n in results)
         results["ensemble"] = float(

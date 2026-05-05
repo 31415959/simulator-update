@@ -10,6 +10,7 @@ from itertools import combinations
 from datetime import datetime
 import numpy as np
 import pandas as pd
+import torch
 from sklearn.linear_model import LogisticRegression
 
 
@@ -25,13 +26,13 @@ MAX_K = 10
 # ═══════════════════════════════════════════════════════════════
 
 def load_all_models(device):
-    """加载 models/ 下所有 .pth，跳过不含 unit_embed 的旧架构"""
+    """加载 models/ 下所有 .pth + .onnx"""
     import torch
     import train
     import importlib
     from train import UnitAwareTransformer
 
-    # 注入 __main__ 以便 pickle 反序列化找到类（torch 仍在函数内导入，worker 不触发）
+    # 注入 __main__ 以便 pickle 反序列化找到类
     import __main__
     __main__.UnitAwareTransformer = UnitAwareTransformer
 
@@ -46,10 +47,8 @@ def load_all_models(device):
     sys.modules["models.model"] = train
     sys.modules.setdefault("ensemble_model", train)
 
+    # PyTorch 模型
     model_files = sorted(MODEL_DIR.glob("*.pth"))
-    if not model_files:
-        raise FileNotFoundError(f"{MODEL_DIR} 下未找到 .pth 文件")
-
     models = {}
     skipped = []
     for f in model_files:
@@ -59,14 +58,34 @@ def load_all_models(device):
                 raise RuntimeError("不兼容的旧架构（缺少 unit_embed）")
             m.eval()
             models[f.stem] = m
-            print(f"  ✓ {f.stem}")
+            print(f"  [OK] {f.stem}")
         except Exception as e:
             skipped.append(f"{f.name}: {e}")
     if skipped:
         print(f"\n  跳过 {len(skipped)} 个不兼容的旧模型:")
         for s in skipped:
-            print(f"    ✗ {s}")
-    return models
+            print(f"    [SKIP] {s}")
+
+    # ONNX 模型
+    onnx_models = {}
+    onnx_files = sorted(MODEL_DIR.glob("*.onnx"))
+    if onnx_files:
+        try:
+            import onnxruntime as ort
+        except ImportError:
+            print("  [!] onnxruntime 未安装，跳过 ONNX 模型")
+            onnx_files = []
+    for f in onnx_files:
+        try:
+            sess = ort.InferenceSession(str(f), providers=['CPUExecutionProvider'])
+            onnx_models[f.stem] = sess
+            print(f"  [ONNX] {f.stem}")
+        except Exception as e:
+            print(f"    [SKIP] ONNX {f.name}: {e}")
+
+    if not models and not onnx_models:
+        raise FileNotFoundError(f"{MODEL_DIR} 下未找到任何模型")
+    return models, onnx_models
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -110,7 +129,23 @@ def _predict_one_model(model, dataset, device, name, track_nan_sample=False):
     return name, np.concatenate(preds), nan_row_indices, nan_sample_info
 
 
-def get_all_predictions(models, dataset, device, desc="预测中"):
+def _predict_one_onnx(session, dataset, name):
+    """ONNX 模型全量预测"""
+    loader = torch.utils.data.DataLoader(dataset, batch_size=4096, shuffle=False, num_workers=0)
+    preds = []
+    for ls, lc, rs, rc, _ in loader:
+        ls_np = ls.cpu().numpy().astype(np.int64)
+        lc_np = lc.cpu().numpy().astype(np.int64)
+        rs_np = rs.cpu().numpy().astype(np.int64)
+        rc_np = rc.cpu().numpy().astype(np.int64)
+        out = session.run(["output"], {"left_signs": ls_np, "left_counts": lc_np, "right_signs": rs_np, "right_counts": rc_np})
+        p = out[0].flatten()
+        p = np.nan_to_num(p, nan=0.5, posinf=1.0, neginf=0.0)
+        preds.append(p)
+    return np.concatenate(preds)
+
+
+def get_all_predictions(models, onnx_models, dataset, device, desc="预测中"):
     """顺序全模型预测 — 单模型满载 GPU，低显存自动降 batch"""
     from tqdm import tqdm
     import torch
@@ -135,8 +170,14 @@ def get_all_predictions(models, dataset, device, desc="预测中"):
         if info:
             nan_sample_info = info
 
-    pred_matrix = np.column_stack([results[name] for name in model_names])
-    return pred_matrix, labels_array, model_names, all_nan_rows, nan_sample_info
+    # ONNX 模型预测
+    onnx_names = list(onnx_models.keys())
+    for name in tqdm(onnx_names, desc=f"{desc} [ONNX]"):
+        results[name] = _predict_one_onnx(onnx_models[name], dataset, name)
+
+    all_names = model_names + onnx_names
+    pred_matrix = np.column_stack([results[name] for name in all_names])
+    return pred_matrix, labels_array, all_names, all_nan_rows, nan_sample_info
 
 
 def evaluate_combination(preds_subset, labels, weights):
@@ -222,8 +263,8 @@ def main():
 
     # 1. 加载模型
     print(f"\n加载模型 ({MODEL_DIR}):")
-    models = load_all_models(device)
-    n_models = len(models)
+    models, onnx_models = load_all_models(device)
+    n_models = len(models) + len(onnx_models)
     if n_models < 2:
         print("  错误: 至少需要 2 个模型才能搜索组合")
         return
@@ -240,7 +281,7 @@ def main():
     # 3. GPU 预测
     print("\n训练集预测中...")
     pred_train, labels_train, model_names, all_nan_rows, _ = get_all_predictions(
-        models, dataset_train, device, desc="训练集")
+        models, onnx_models, dataset_train, device, desc="训练集")
     if all_nan_rows:
         print(f"  剔除 {len(all_nan_rows)} 条异常样本", flush=True)
         keep_mask = np.ones(pred_train.shape[0], dtype=bool)
@@ -251,7 +292,7 @@ def main():
 
     print("\n验证集预测中...")
     pred_val, labels_val, _, all_nan_rows_val, _ = get_all_predictions(
-        models, dataset_val, device, desc="验证集")
+        models, onnx_models, dataset_val, device, desc="验证集")
     if all_nan_rows_val:
         keep_mask_val = np.ones(pred_val.shape[0], dtype=bool)
         keep_mask_val[list(all_nan_rows_val)] = False
@@ -266,6 +307,10 @@ def main():
     for i, name in enumerate(model_names):
         acc = ((pred_val[:, i] > 0.5).astype(float) == labels_val).mean()
         baselines[name] = acc
+    # 标记 ONNX 模型
+    for name in onnx_models:
+        if name in baselines:
+            baselines[f"{name} [ONNX]"] = baselines.pop(name)
     for rank, (name, acc) in enumerate(sorted(baselines.items(), key=lambda x: -x[1]), 1):
         print(f"  {rank:>2}. {name[:50]:<50} {acc:.4f}")
 
@@ -281,7 +326,7 @@ def main():
     best_eq_k = max(eq_baselines, key=eq_baselines.get)
     print(f"  等权最佳: k={best_eq_k}, acc={eq_baselines[best_eq_k]:.4f}")
     if best_eq_k > MAX_K:
-        print(f"  ⚠ 等权最佳 k={best_eq_k} > MAX_K={MAX_K}，考虑放宽截断")
+        print(f"  [!] 等权最佳 k={best_eq_k} > MAX_K={MAX_K}，考虑放宽截断")
 
     # 6. 数据均衡
     pos_ratio = labels_train.mean()
@@ -349,7 +394,7 @@ def main():
 
     if missing:
         if cached_count:
-            print(f"  ✓ 缓存命中 {cached_count}/{total_combos} 组合 → 只算 {len(missing)} 个新组合")
+            print(f"  [OK] 缓存命中 {cached_count}/{total_combos} 组合 → 只算 {len(missing)} 个新组合")
         chunksz = max(1, len(missing) // (n_workers * 3))
         print(f"多进程并行拟合 LR ({n_workers} 进程, chunksize={chunksz})...")
         combo_to_index = {c: i for i, c in enumerate(combo_inputs)}
@@ -367,7 +412,7 @@ def main():
                         f, protocol=pickle.HIGHEST_PROTOCOL)
         print(f"  缓存已更新: {cache_path.name} ({len(cache_weights)} 条目)")
     else:
-        print(f"  ✓ 全部命中缓存 {cache_path.name}，跳过 LR 拟合")
+        print(f"  [OK] 全部命中缓存 {cache_path.name}，跳过 LR 拟合")
 
     # 9. 评估
     print("\n评估组合中...")

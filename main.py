@@ -32,12 +32,18 @@ from simulator.monsters import MonsterFactory
 
 logging.getLogger().setLevel(logging.DEBUG)
 logging.getLogger("PIL").setLevel(logging.INFO)
-stream_handler = logging.StreamHandler()
 formatter = logging.Formatter(
     "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+# 控制台输出 (显式 stdout，避免 PyQt6 吞 stderr)
+import sys as _sys
+stream_handler = logging.StreamHandler(_sys.stdout)
 stream_handler.setFormatter(formatter)
 logging.getLogger().addHandler(stream_handler)
+# 文件输出 — 每次启动覆盖 log.txt
+file_handler = logging.FileHandler("log.txt", encoding="utf-8", mode="w")
+file_handler.setFormatter(formatter)
+logging.getLogger().addHandler(file_handler)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
@@ -343,7 +349,7 @@ class ArknightsApp(QMainWindow):
 
         # 更新模型权重按钮
         self.update_weights_button = QPushButton("更新权重")
-        self.update_weights_button.setToolTip("运行 model_selection.py 重新计算最优模型组合权重")
+        self.update_weights_button.setToolTip("运行 模型权重计算.py 重新计算最优模型组合权重")
         self.update_weights_button.clicked.connect(self.run_model_selection)
         row2_layout.addWidget(self.update_weights_button)
 
@@ -1158,7 +1164,7 @@ class ArknightsApp(QMainWindow):
         QApplication.processEvents()
         try:
             result = subprocess.run(
-                [sys.executable, "model_selection.py"],
+                [sys.executable, "模型权重计算.py"],
                 cwd=os.path.dirname(os.path.abspath(__file__)),
                 capture_output=True, text=True, timeout=600
             )

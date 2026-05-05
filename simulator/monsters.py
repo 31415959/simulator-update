@@ -2152,7 +2152,7 @@ class 迷路的巨像(Monster):
 
 
 class 暴走食人花(Monster):
-    """暴走食人花 — 吞噬目标后进入消化模式"""
+    """暴走食人花 — 吞噬目标后进入消化模式（不能吞噬BOSS）"""
 
     def on_spawn(self):
         self.attack_animation = AttackAnimation(0.3, 0.1, 0.6, self)
@@ -2161,7 +2161,12 @@ class 暴走食人花(Monster):
         self.digest_duration = 20  # 消化持续20秒
 
     def attack(self, target, gameTime):
-        """吞噬：直接击倒目标，然后进入消化模式"""
+        """吞噬：对非BOSS目标直接击倒，对BOSS无效"""
+        if target.boss:
+            # BOSS免疫吞噬，食人花无法攻击BOSS
+            self.reset_attack_time()
+            return
+
         debug_print(f"{self.name}{self.id} 吞噬了 {target.name}{target.id}！")
         # 直接击杀目标
         target.health = 0
@@ -2928,6 +2933,7 @@ class 庞贝(Monster):
         self.attack_animation = AttackAnimation(0.3, 0.3, 0.4, self)
         self._self_destruct_timer = 0.0
         self._speed_boosted = False
+        self.boss = True
 
     def attack(self, target, gameTime):
         # 多目标攻击(行为组件处理) + 灼烧
