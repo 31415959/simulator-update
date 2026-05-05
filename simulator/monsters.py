@@ -1037,93 +1037,90 @@ class 船长(Monster):
 
 
 class 杰斯顿·威廉姆斯(Monster):
-    """洁厕灵"""
+    """杰斯顿 — 体面形态(远程法伤) → 真面目形态(近战物理)"""
 
     def on_spawn(self):
         self.stage = 0
         self.attack_count = 0
-        self.magic_resist += 50
+        self.magic_resist += 50  # 体面形态法抗70
         self.boss = True
         self.attack_animation = AttackAnimation(0.7, 0.1, 0.3, self)
-
-    # def get_skill_bar(self):
-    #     """技力在ui显示的内容"""
-    #     return self.attack_count % 4
-
-    # def get_max_skill_bar(self):
-    #     """技力在ui显示的内容，最大技力"""
-    #     return 4
+        self._skill_target = None  # 二阶段强力击锁定目标
 
     def on_attack(self, target, damage):
         self.attack_count += 1
 
     def attack(self, target, gameTime):
+        self.on_attack(target, 0)
+        is_skill = self.attack_count % 4 == 0
+
         if self.stage == 0:
-            self.on_attack(target, 0)
-            if self.attack_count % 4 == 0:
-                targets: list[Monster] = TargetSelector.select_targets(self, self.battlefield, need_in_range=True,
-                                                                       max_targets=2)
-                if len(targets) == 0:
-                    return
-
+            if is_skill:
+                # 体面强力击：2目标100%法伤+3s晕眩
+                targets: list[Monster] = TargetSelector.select_targets(
+                    self, self.battlefield, need_in_range=True, max_targets=2)
                 for m in targets:
-                    damage = self.calculate_damage(m, self.get_attack_power())
-                    if self.apply_damage_to_target(m, damage):
-                        m.on_hit(self, damage)
-                        m.status_system.apply(BuffEffect(
-                            type=BuffType.DIZZY,
-                            duration=3,
-                            source=self
-                        ))
+                    dmg = self.calculate_damage(m, self.get_attack_power())
+                    if self.apply_damage_to_target(m, dmg):
+                        m.on_hit(self, dmg)
+                        m.status_system.apply(BuffEffect(BuffType.DIZZY, 3.0, self))
             else:
-                super().attack(target, gameTime)
-                return
+                # 普通远程法伤单目标
+                targets = TargetSelector.select_targets(
+                    self, self.battlefield, need_in_range=True, max_targets=1)
+                for m in targets:
+                    dmg = self.calculate_damage(m, self.get_attack_power())
+                    if self.apply_damage_to_target(m, dmg):
+                        m.on_hit(self, dmg)
         else:
-            self.on_attack(self.target, 0)
-            damage = self.calculate_damage(target, self.get_attack_power())
-            if self.apply_damage_to_target(target, damage):
-                target.on_hit(self, damage)
+            if is_skill:
+                # 真面目强力击：锁定目标，2连击无视60%防
+                self._phase2_skill()
+            else:
+                # 普通近战物理
+                targets = TargetSelector.select_targets(
+                    self, self.battlefield, need_in_range=True, max_targets=1)
+                for m in targets:
+                    dmg = self.calculate_damage(m, self.get_attack_power())
+                    if self.apply_damage_to_target(m, dmg):
+                        m.on_hit(self, dmg)
 
-            if self.stage == 1 and self.attack_count % 4 == 0:
-                if self.apply_damage_to_target(target, damage):
-                    target.on_hit(self, damage)
-
-    def calculate_damage(self, target: Monster, damage):
-        if self.stage == 1 and self.attack_count % 4 == 0:
-            target_def = target.phy_def * 0.4
-            return calculate_normal_dmg(target_def, target.magic_resist, damage, DamageType.PHYSICAL)
-        return super().calculate_damage(target, damage)
+    def _phase2_skill(self):
+        """二阶段强力击：优先锁定最后出现的敌人，2连击无视60%防御"""
+        # 目标死了就换一个（优先最后出现的）
+        if not self._skill_target or not self._skill_target.is_alive:
+            enemies = [m for m in self.battlefield.alive_monsters
+                       if m.faction != self.faction and m.is_alive]
+            if enemies:
+                self._skill_target = max(enemies, key=lambda m: m.id)
+        if self._skill_target and self._skill_target.is_alive:
+            atk = self.get_attack_power()
+            for _ in range(2):
+                def_reduced = self._skill_target.phy_def * 0.4
+                dmg = calculate_normal_dmg(def_reduced, self._skill_target.magic_resist,
+                                           atk, DamageType.PHYSICAL)
+                if self.apply_damage_to_target(self._skill_target, dmg):
+                    self._skill_target.on_hit(self, dmg)
 
     def on_death(self):
         if self.stage == 0:
             self.stage = 1
-            self.magic_resist -= 50
+            self.magic_resist = 20  # 真面目法抗回到20
             self.attack_type = DamageType.PHYSICAL
-            self.attack_power += 700
+            self.attack_power = self.attack_power + 700 * 1.5  # +1050
             self.phy_def += 1000
             self.attack_interval -= 1.5
             self.move_speed += 0.3
             self.attack_range = 0.8
             self.attack_count = 0
+            self._skill_target = None
             self.attack_animation = AttackAnimation(0.4, 0.3, 0.3, self)
-
             self.is_alive = True
             self.health = self.max_health
             self.status_system.reset()
-            switch_stage = BuffEffect(
-                type=BuffType.INVINCIBLE2,
-                duration=4,
-                source=self
-            )
-            dizzy = BuffEffect(
-                type=BuffType.DIZZY,
-                duration=4,
-                source=self
-            )
-            # 转阶段
-            self.status_system.apply(switch_stage)
-            self.status_system.apply(dizzy)
-            print(f"{self.name}{self.id}已进入狂暴状态")
+            self.status_system.apply(BuffEffect(BuffType.INVINCIBLE2, 4.0, self))
+            self.status_system.apply(BuffEffect(BuffType.DIZZY, 4.0, self))
+            debug_print(f"{self.name}{self.id} 进入真面目形态！ATK={self.attack_power}")
         else:
             super().on_death()
 
@@ -2302,6 +2299,7 @@ class 反装甲步兵(Monster):
                 self.mode = "冲锋"
                 self.attack_power = self.base_atk  # 攻击回归100%
                 self.move_speed = self.base_move * 3.0  # +200%移速
+                self.attack_range = 0.8  # 切换近战
                 self.attack_animation = AttackAnimation(0.15, 0.15, 0.7, self)
                 debug_print(f"{self.name}{self.id} 切换冲锋模式！移速+200%")
 

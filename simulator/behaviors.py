@@ -165,22 +165,49 @@ class DefenseReduceOnHit(BaseBehavior):
 
 
 class SplitOnHalfHP(BaseBehavior):
-    """半血分裂 — 创造一个自身复制"""
-    def __init__(self, owner):
+    """半血分裂 — 1秒分裂过程后召唤指定怪物（默认自身），仅一次"""
+    def __init__(self, owner, monster_name=None):
         super().__init__(owner)
         self.triggered = False
+        self.monster_name = monster_name
+        self.splitting = False      # 正在分裂中
+        self.split_timer = 0.0      # 分裂剩余时间
+        self._split_hp_ratio = 0.0  # 触发时的生命比例
     
     def on_hit(self, attacker, damage):
+        self._check_split()
+    
+    def on_update(self, delta_time):
+        if self.splitting:
+            self.split_timer -= delta_time
+            if self.split_timer <= 0:
+                self._do_split()
+                self.splitting = False
+            return
+        self._check_split()
+    
+    def _check_split(self):
         if not self.triggered and self.owner.health <= self.owner.max_health * 0.5:
             self.triggered = True
-            pos = self.owner.position + _FV(
-                np.random.uniform(-0.3, 0.3),
-                np.random.uniform(-0.3, 0.3))
-            clone = self.owner.battlefield.append_monster_name(
-                self.owner.name, self.owner.faction, pos)
-            if clone:
-                clone.health = self.owner.health
-                clone.max_health = self.owner.max_health
+            self.splitting = True
+            self.split_timer = 1.0
+            self._split_hp_ratio = self.owner.health / self.owner.max_health
+            self.owner.dizzy = True  # 分裂期间不能攻击/移动
+            debug_print(f"{self.owner.name}{self.owner.id} 开始分裂！（当前生命{self._split_hp_ratio*100:.0f}%）")
+    
+    def _do_split(self):
+        """分裂完成：在0.6正方形内随机位置生成分身"""
+        self.owner.dizzy = False  # 恢复
+        pos = self.owner.position + _FV(
+            np.random.uniform(-0.3, 0.3),
+            np.random.uniform(-0.3, 0.3))
+        spawn_name = self.monster_name if self.monster_name else self.owner.name
+        clone = self.owner.battlefield.append_monster_name(
+            spawn_name, self.owner.faction, pos)
+        if clone:
+            clone.health = clone.max_health * self._split_hp_ratio
+            clone.behaviors = []
+            debug_print(f"{self.owner.name}{self.owner.id} 分裂完成！生成 {spawn_name}{clone.id} (HP={clone.health:.0f})")
 
 
 class PeriodicSummon(BaseBehavior):

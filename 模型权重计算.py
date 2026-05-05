@@ -130,10 +130,11 @@ def _predict_one_model(model, dataset, device, name, track_nan_sample=False):
 
 
 def _predict_one_onnx(session, dataset, name):
-    """ONNX 模型全量预测"""
-    loader = torch.utils.data.DataLoader(dataset, batch_size=4096, shuffle=False, num_workers=0)
+    """ONNX 模型全量预测（batch=1，较慢）"""
+    from tqdm import tqdm
+    loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
     preds = []
-    for ls, lc, rs, rc, _ in loader:
+    for ls, lc, rs, rc, _ in tqdm(loader, desc=f"  ONNX {name}", total=len(dataset), mininterval=1):
         ls_np = ls.cpu().numpy().astype(np.int64)
         lc_np = lc.cpu().numpy().astype(np.int64)
         rs_np = rs.cpu().numpy().astype(np.int64)
@@ -171,9 +172,13 @@ def get_all_predictions(models, onnx_models, dataset, device, desc="预测中"):
             nan_sample_info = info
 
     # ONNX 模型预测
-    onnx_names = list(onnx_models.keys())
-    for name in tqdm(onnx_names, desc=f"{desc} [ONNX]"):
-        results[name] = _predict_one_onnx(onnx_models[name], dataset, name)
+    onnx_names = []
+    for name in list(onnx_models.keys()):
+        try:
+            results[name] = _predict_one_onnx(onnx_models[name], dataset, name)
+            onnx_names.append(name)
+        except Exception as e:
+            print(f"\n  [SKIP] ONNX {name}: {e}")
 
     all_names = model_names + onnx_names
     pred_matrix = np.column_stack([results[name] for name in all_names])
@@ -307,12 +312,11 @@ def main():
     for i, name in enumerate(model_names):
         acc = ((pred_val[:, i] > 0.5).astype(float) == labels_val).mean()
         baselines[name] = acc
-    # 标记 ONNX 模型
-    for name in onnx_models:
-        if name in baselines:
-            baselines[f"{name} [ONNX]"] = baselines.pop(name)
+    # ONNX 模型保持原名，显示时标注
+    onnx_display = {name: f"{name} [ONNX]" for name in onnx_models}
     for rank, (name, acc) in enumerate(sorted(baselines.items(), key=lambda x: -x[1]), 1):
-        print(f"  {rank:>2}. {name[:50]:<50} {acc:.4f}")
+        display = onnx_display.get(name, name)
+        print(f"  {rank:>2}. {display[:50]:<50} {acc:.4f}")
 
     # 5. 等权重基线
     print("\n等权重集成基线（k=1~全部）:")
