@@ -200,10 +200,10 @@ class SandboxSimulator:
                 # 尝试多种引号变体（JSON直引号U+0022 vs 文件名弯引号U+201C/D）
                 noq = clean_name  # 纯名字无引号
                 candidates = [
+                    noq,                                           # 无引号优先
                     orig,                                          # 原始
                     '“' + noq + '”',                     # 弯引号
                     '"' + noq + '"',                               # 直引号
-                    noq,                                           # 无引号
                 ]
                 cv_img = None
                 for cand in candidates:

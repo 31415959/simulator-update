@@ -224,9 +224,17 @@ class PeriodicSummon(BaseBehavior):
     def on_update(self, delta_time):
         if self.total_summoned >= self.max_total:
             return
+        # 召唤后0.25秒停顿恢复
+        if self.owner.dizzy and hasattr(self, '_dizzy_timer'):
+            self._dizzy_timer -= delta_time
+            if self._dizzy_timer <= 0:
+                self.owner.dizzy = False
+            return
         self.timer -= delta_time
         if self.timer <= 0:
             self.timer += self.interval
+            self.owner.dizzy = True  # 召唤停顿
+            self._dizzy_timer = 0.25
             for _ in range(self.count):
                 if self.total_summoned >= self.max_total:
                     break
@@ -418,28 +426,38 @@ class RangeExecute(BaseBehavior):
 
 
 class SpinAttack(BaseBehavior):
-    """旋转AOE — 每秒对周围造成伤害，期间攻击力提升"""
-    def __init__(self, owner, radius=1.0, damage_ratio=1.2, duration=60.0, cooldown=60.0, atk_boost=1.5, dmg_type='物理'):
+    """旋转AOE — 每秒对周围造成伤害，期间攻击力提升。ally_name在场时duration翻倍"""
+    def __init__(self, owner, radius=1.0, damage_ratio=1.2, duration=60.0, cooldown=60.0, atk_boost=1.5, dmg_type='物理', ally_name=None):
         super().__init__(owner)
         self.radius = radius
         self.damage_ratio = damage_ratio
         self.duration = duration
         self.cooldown = cooldown
-        self.atk_boost = atk_boost  # 旋转期间攻击力倍率
+        self.atk_boost = atk_boost
+        self.ally_name = ally_name  # 在场时duration×2
         self.dmg = DamageType.PHYSICAL if dmg_type == '物理' else DamageType.MAGIC
         self.spinning = False
         self.spin_timer = 0
         self.cooldown_timer = np.random.uniform(0, cooldown)
         self._saved_atk = owner.attack_power
     
+    def _has_ally(self):
+        if not self.ally_name:
+            return False
+        for m in self.owner.battlefield.alive_monsters:
+            if m.faction == self.owner.faction and m.is_alive and m.name == self.ally_name:
+                return True
+        return False
+    
     def on_update(self, delta_time):
         if self.spinning:
             self.spin_timer -= delta_time
             if self.spin_timer <= 0:
                 self.spinning = False
-                self.owner.attack_power = self._saved_atk  # 恢复攻击力
+                self.owner.attack_power = self._saved_atk
                 self.cooldown_timer = self.cooldown
                 return
+            self.owner.attack_time_counter = self.owner.attack_interval
             targets = self.owner.battlefield.query_monster(self.owner.position, self.radius)
             base_dmg = self._saved_atk * self.atk_boost * self.damage_ratio * delta_time
             for t in targets:
@@ -450,9 +468,10 @@ class SpinAttack(BaseBehavior):
             self.cooldown_timer -= delta_time
             if self.cooldown_timer <= 0:
                 self.spinning = True
-                self.spin_timer = self.duration
+                dur = self.duration * 2 if self._has_ally() else self.duration
+                self.spin_timer = dur
                 self._saved_atk = self.owner.attack_power
-                self.owner.attack_power = self._saved_atk * self.atk_boost  # 旋转期间攻击力提升
+                self.owner.attack_power = self._saved_atk * self.atk_boost
                 debug_print(f"{self.owner.name} 开始旋转! ATK×{self.atk_boost}")
 
 
