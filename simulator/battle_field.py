@@ -30,8 +30,8 @@ DEPLOY_INTERVAL = 1      # 波内每帧投放一个（18帧≈0.6s出完一波�
 # 出生门配置（每边9个门，均匀分布在y轴）
 DOOR_COUNT = 9
 DOOR_SPAWN_RADIUS = 0.2  # 门中心半径0.2范围内随机出生
-LEFT_DOORS = [FastVector(0, 0.5 + i) for i in range(DOOR_COUNT)]
-RIGHT_DOORS = [FastVector(MAP_SIZE[0], 0.5 + i) for i in range(DOOR_COUNT)]
+LEFT_DOORS = [FastVector(0.5, 0.5 + i) for i in range(DOOR_COUNT)]
+RIGHT_DOORS = [FastVector(12.5, 0.5 + i) for i in range(DOOR_COUNT)]
 
 
 from collections import defaultdict
@@ -170,25 +170,37 @@ class Battlefield:
         self.alive_monsters = self.monsters
         self.gameTime = 0
         self.current_spawn = 0
-        # 分批投放：同种怪保持连续（种内随机，种类顺序随机），避免不同种类交错
-        self._shuffle_by_type(self.monster_temporal_area_left)
-        self._shuffle_by_type(self.monster_temporal_area_right)
+        # 每波内各类型均分名额，波内打乱顺序
+        self._interleave_deployment(self.monster_temporal_area_left)
+        self._interleave_deployment(self.monster_temporal_area_right)
         return True
 
     @staticmethod
-    def _shuffle_by_type(units):
-        """同种怪物保持连续，种内随机打乱，种类出场顺序也随机"""
+    def _interleave_deployment(units):
+        """每波内各类型均分名额，波内随机打乱"""
         from collections import defaultdict
         by_name = defaultdict(list)
         for u in units:
             by_name[u.name].append(u)
-        names = list(by_name.keys())
-        random.shuffle(names)  # 种类出场顺序随机
+        remaining = {n: len(g) for n, g in by_name.items()}
+        types = list(by_name.keys())
+        result = []
+        while any(remaining.values()):
+            active = [t for t in types if remaining[t] > 0]
+            if not active:
+                break
+            per_type = max(1, WAVE_SIZE // len(active))
+            wave_units = []
+            for t in active:
+                take = min(per_type, remaining[t])
+                for _ in range(take):
+                    wave_units.append(by_name[t].pop())
+                remaining[t] -= take
+            random.shuffle(wave_units)
+            result.extend(wave_units)
         units.clear()
-        for n in names:
-            group = by_name[n]
-            random.shuffle(group)  # 同种内部随机
-            units.extend(group)
+        units.extend(result)
+
 
     def check_victory(self):
         """检查胜利条件"""

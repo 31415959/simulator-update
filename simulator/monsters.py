@@ -559,7 +559,7 @@ class Monster:
         #     # return int(damage * (1.0 - target.magic_resist / 100))
 
     def dodge_and_invincible(self, damage, attack_type: DamageType):
-        if attack_type == DamageType.PHYSICAL and self.phys_dodge > 0:
+        if attack_type == DamageType.PHYSICAL and self.phys_dodge > 0 and damage < self.health:
             if random.uniform(0, 1) < self.phys_dodge / 100:
                 return False
         if self.invincible:
@@ -2221,13 +2221,20 @@ class 散华骑士团学徒(Monster):
                 debug_print(f"{self.name}{self.id} 开始蓄力光弹！")
 
     def _fire_light_bomb(self):
-        """释放光弹：对周围敌人造成250%法伤"""
+        """释放光弹：对目标地点周围敌人造成250%法伤"""
         pos = self.position
         radius = 1.5
         dmg_base = self.get_attack_power() * 2.5
+        # 找一个敌方目标作为弹着点
+        import random
+        enemies = [t for t in self.battlefield.alive_monsters if t.faction != self.faction and t.is_alive]
+        if enemies:
+            target_pos = random.choice(enemies).position
+        else:
+            target_pos = pos
         for t in self.battlefield.alive_monsters:
             if t.faction != self.faction and t.is_alive and \
-               (t.position - pos).magnitude <= radius:
+               (t.position - target_pos).magnitude <= radius:
                 dmg = calculate_normal_dmg(t.phy_def, t.magic_resist, dmg_base, DamageType.MAGIC)
                 t.take_damage(dmg, DamageType.MAGIC)
                 debug_print(f"{self.name}{self.id} 光弹命中 {t.name}{t.id} 造成{dmg:.0f}伤害")
@@ -2379,32 +2386,19 @@ class 圣徒卡门(Monster):
 # ═══════════════════════════════════════════
 
 class R11突击动力装甲(Monster):
-    """R-11 — 锁定连拳，对同一目标伤害递增"""
+    """R-11 — 攻击造成50%ATK物理伤害，同时攻击4个目标"""
     def on_spawn(self):
         self.attack_animation = AttackAnimation(0.1, 0.15, 0.75, self)
-        self.combo_count = 0
-        self.last_target = None
-        self.combo_dmg_bonus = 0.2  # 每连击+20%伤害
 
     def attack(self, target, gameTime):
-        # 多目标
-        targets = TargetSelector.select_targets(self, self.battlefield, need_in_range=True, max_targets=2)
+        targets = TargetSelector.select_targets(self, self.battlefield, need_in_range=True, max_targets=4)
         if not targets:
             return
-
+        base_dmg = self.get_attack_power() * 0.5  # 50%ATK
         for t in targets:
-            base_dmg = self.get_attack_power()
-            if t == self.last_target:
-                self.combo_count = min(self.combo_count + 1, 5)
-            else:
-                self.combo_count = 0
-                self.last_target = t
-
-            bonus = base_dmg * self.combo_dmg_bonus * self.combo_count
-            dmg = self.calculate_damage(t, base_dmg + bonus)
+            dmg = self.calculate_damage(t, base_dmg)
             if self.apply_damage_to_target(t, dmg):
                 t.on_hit(self, dmg)
-            debug_print(f"{self.name}{self.id} 对 {t.name}{t.id} x{self.combo_count}连击 造成{dmg:.0f}伤害")
 
 
 # ═══════════════════════════════════════════

@@ -1,0 +1,5 @@
+Left units: 16, Right: 45
+Wave1 end @f18: L=16/16 R=18/45
+Wave2 end @f66: L=16/16 R=36/45
+Wave3 end @f105: L=16/16 R=45/45
+Result: RIGHT f=1276

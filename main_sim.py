@@ -255,10 +255,11 @@ class SandboxSimulator:
         right_army_config = {_resolve(k): v for k, v in self.battle_data.get("right", {}).items()}
 
         self.battle_field.setup_battle(left_army_config, right_army_config, self.monster_data)
-        while self.battle_field.gameTime < 6.0:
-            result = self.battle_field.run_one_frame()
-            if result:
-                break
+        # 快进到第一波投放完毕，后续波次战斗中自然播放
+        while True:
+            self.battle_field.run_one_frame()
+            if self.battle_field._wave_cooldown == 30:
+                break  # 第一波结束，开始冷却
         self.refresh_canvas_display()
 
     def on_mouse_drag(self, event):
