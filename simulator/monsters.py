@@ -2794,41 +2794,39 @@ class 岁相(Monster):
 # ═══════════════════════════════════════════
 
 class 奎隆(Monster):
-    """奎隆 — 多阶段BOSS，半血后进入二阶段"""
+    """奎隆 — 晕眩/冻结时间减半，初动15s/循环30s技能5连击"""
     def on_spawn(self):
         self.attack_animation = AttackAnimation(0.15, 0.15, 0.7, self)
-        self.phase = 1
         self.boss = True
-        self.immunity.add(BuffType.DIZZY)
-        self.immunity.add(BuffType.FROZEN)
         self.skill_timer = 15.0
-        self.base_atk = self.attack_power
+        self.skill_cooldown = 30.0
+        self.skill_hits = 5
+        self._halved_effects = set()  # 已减半的效果ID
 
     def on_extra_update(self, delta_time):
-        if self.phase == 1 and self.health < self.max_health * 0.5:
-            self.phase = 2
-            self.attack_power = self.base_atk * 1.5
-            self.attack_speed += 100
-            self.move_speed *= 1.3
-            debug_print(f"{self.name} 进入第二阶段！")
+        # 晕眩/冻结时间减半（仅首次）
+        for e in self.status_system.effects:
+            if e.type in (BuffType.DIZZY, BuffType.FROZEN) and id(e) not in self._halved_effects:
+                e.duration *= 0.5
+                self._halved_effects.add(id(e))
 
         self.skill_timer -= delta_time
         if self.skill_timer <= 0:
-            self.skill_timer = 15.0
+            self.skill_timer = self.skill_cooldown
             self._skill_attack()
 
     def _skill_attack(self):
-        """技能：对3个目标发射剑波"""
-        targets = TargetSelector.select_targets(self, self.battlefield, need_in_range=False, max_targets=3)
-        for t in targets:
-            dmg = self.calculate_damage(t, self.get_attack_power() * 2.0)
-            if self.apply_damage_to_target(t, dmg):
-                t.on_hit(self, dmg)
-        debug_print(f"{self.name} 释放剑波！")
+        """技能：对目标造成90%ATK物理伤害×5次"""
+        if not self.target or not self.target.is_alive:
+            return
+        for i in range(self.skill_hits):
+            dmg = self.calculate_damage(self.target, self.get_attack_power() * 0.9)
+            if self.apply_damage_to_target(self.target, dmg):
+                self.target.on_hit(self, dmg)
+        debug_print(f"{self.name} 释放5连击！")
 
     def attack(self, target, gameTime):
-        max_tgts = 2 if self.phase == 1 else 3
-        targets = TargetSelector.select_targets(self, self.battlefield, need_in_range=True, max_targets=max_tgts)
+        targets = TargetSelector.select_targets(self, self.battlefield, need_in_range=True, max_targets=1)
         for t in targets:
             dmg = self.calculate_damage(t, self.get_attack_power())
             if self.apply_damage_to_target(t, dmg):
