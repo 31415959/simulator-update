@@ -439,9 +439,10 @@ class SwordStack(BaseBehavior):
             # 保持加成不变
             self.owner.attack_power = self.base_atk * (1 + self.atk_per_sword)
         else:
-            # 刀耗尽，回到100%，额外砍一刀
+            # 刀耗尽，回到100%，额外砍一刀（走正常伤害计算）
             self.owner.attack_power = self.base_atk
-            target.take_damage(self.base_atk, self.owner.attack_type)
+            dmg = calculate_normal_dmg(target.phy_def, target.magic_resist, self.base_atk, self.owner.attack_type)
+            target.take_damage(dmg, self.owner.attack_type)
             debug_print(f"{self.owner.name} 刀耗尽，额外一击!")
 
 

@@ -190,12 +190,12 @@ class StatusSystem:
     def _process_dot(self, delta_time):
         fire = next((e for e in self.effects if e.type == BuffType.FIRE), None)
         if fire:
-            # 每秒造成伤害
-            # self.fire_dmg_counter += delta_time
-            # if self.fire_dmg_counter >= 0.33:
-            #     self.fire_dmg_counter = 0
-            damage = calculate_normal_dmg(0, self.owner.magic_resist, 60 * delta_time, DamageType.MAGIC)
-            self.owner.take_damage(damage, DamageType.MAGIC)
+            self.fire_dmg_counter += delta_time
+            if self.fire_dmg_counter >= 1.0:
+                self.fire_dmg_counter -= 1.0
+                damage = calculate_normal_dmg(0, self.owner.magic_resist, 60, DamageType.MAGIC)
+                if self.owner.take_damage(damage, DamageType.MAGIC):
+                    debug_print(f"{self.owner.name}{self.owner.id} 受到烧伤{damage:.0f}点法术伤害")
 
         corrupt = next((e for e in self.effects if e.type == BuffType.CORRUPT), None)
         if corrupt:
@@ -2115,6 +2115,42 @@ class 自在(Monster):
 
 
 
+# ═══════════════════════════════════════════
+# 迷路的巨像 — 投石机
+# ═══════════════════════════════════════════
+
+class 迷路的巨像(Monster):
+    """迷路的巨像 — 13s冷却，对2.5范围内最近未晕眩敌人投石，70%ATK物伤+25s晕眩"""
+    def on_spawn(self):
+        self.attack_animation = AttackAnimation(0.4, 0.2, 0.4, self)
+        self.skill_cd = 13.0
+        self.skill_timer = 6.0  # 首次错开
+
+    def on_extra_update(self, delta_time):
+        self.skill_timer -= delta_time
+        if self.skill_timer <= 0:
+            self._throw_boulder()
+            self.skill_timer = self.skill_cd
+
+    def _throw_boulder(self):
+        """投石：2.5范围内找最近的未晕眩敌人，造成70%ATK物理伤害+25s晕眩"""
+        targets = []
+        for t in self.battlefield.alive_monsters:
+            if t.faction != self.faction and t.is_alive and not t.dizzy:
+                dist = (t.position - self.position).magnitude
+                if dist <= 2.5:
+                    targets.append((dist, t))
+        if not targets:
+            return
+        targets.sort(key=lambda x: x[0])
+        t = targets[0][1]
+        dmg = self.get_attack_power() * 0.7
+        dmg = calculate_normal_dmg(t.phy_def, t.magic_resist, dmg, self.attack_type)
+        t.take_damage(dmg, self.attack_type)
+        t.status_system.apply(BuffEffect(BuffType.DIZZY, 25.0, self))
+        debug_print(f"{self.name}{self.id} 投石命中 {t.name}{t.id} 造成{dmg:.0f}伤害，晕眩25s")
+
+
 class 暴走食人花(Monster):
     """暴走食人花 — 吞噬目标后进入消化模式"""
 
@@ -2154,7 +2190,7 @@ class 沙滩车(Monster):
         self.attack_animation = AttackAnimation(0.3, 0.2, 0.5, self)
         self.passengers = []
         self.max_passengers = 3
-        self.load_range = 0.5
+        self.load_range = 0.8
         self.unloaded = False
 
     def on_extra_update(self, delta_time):
@@ -2183,6 +2219,7 @@ class 沙滩车(Monster):
                 p.position = self.position + FastVector(
                     np.random.uniform(-0.3, 0.3),
                     np.random.uniform(-0.3, 0.3))
+                p.attack_time_counter = p.attack_interval  # 刷新攻击间隔
                 p.target = p.find_target()
                 debug_print(f"{self.name}{self.id} 卸下 {p.name}{p.id}")
         self.passengers.clear()
@@ -2412,6 +2449,7 @@ class R31重型动力装甲(Monster):
         self.splash_radius = 1.0
         self.splash_ratio = 0.5
         self.sp = 0
+        self.immunity.add(BuffType.DIZZY)  # 免疫眩晕
         # 强力击连拳状态
         self._combo_active = False
         self._combo_target = None
@@ -2911,15 +2949,18 @@ class 庞贝(Monster):
                 t.status_system.apply(BuffEffect(BuffType.FIRE, 10.0, self))
 
     def on_extra_update(self, delta_time):
-        # 被围自爆：每10秒对周围1.4范围造成1000法伤
-        self._self_destruct_timer += delta_time
+        # 自爆：0.8范围内有敌人时开始计时，受晕眩/冻结时暂停
+        nearby = self.battlefield.query_monster(self.position, 0.8)
+        enemies_nearby = [m for m in nearby if m.faction != self.faction and m.is_alive]
+        if enemies_nearby and not self.dizzy and not self.frozen:
+            self._self_destruct_timer += delta_time
         if self._self_destruct_timer >= 10.0:
             self._self_destruct_timer = 0.0
-            nearby = self.battlefield.query_monster(self.position, 1.4)
-            enemies = [m for m in nearby if m.faction != self.faction and m.is_alive]
-            if enemies:
+            aoe = self.battlefield.query_monster(self.position, 1.4)
+            targets = [m for m in aoe if m.faction != self.faction and m.is_alive]
+            if targets:
                 debug_print(f"{self.name}{self.id} 自爆！")
-                for m in enemies:
+                for m in targets:
                     dmg = calculate_normal_dmg(m.phy_def, m.magic_resist, 1000, DamageType.MAGIC)
                     m.take_damage(dmg, DamageType.MAGIC)
         
@@ -2984,6 +3025,7 @@ class MonsterFactory:
         # 添加更多映射...
         "炮击组长": 炮击组长,
         "暴走食人花": 暴走食人花,
+        "迷路的巨像": 迷路的巨像,
         "全封闭沙滩车": 沙滩车,
 
         # ═══ 新子类注册 ═══
